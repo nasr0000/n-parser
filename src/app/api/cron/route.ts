@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
     
     let newPostsCount = 0;
 
-    for (const item of items) {
+    for (const item of items as any[]) {
       const url = item.url || '';
       
       // Пропускаем странные пустые объекты
