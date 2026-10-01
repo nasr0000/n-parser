@@ -83,7 +83,7 @@ export async function GET(req: NextRequest) {
           title: `📸 Новый пост от @${username}`,
           body: (item.caption || '').slice(0, 100) || 'Нажмите, чтобы открыть или скачать.',
           image: postData.thumbnailUrl || '',
-          url: postData.url
+          url: '/'  // Открываем наш InstaDash, а не Instagram
         });
 
         subsSnapshot.forEach(async (doc) => {
