@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, query, orderBy } from 'firebase/firestore';
-import { Bell, BellOff, Download, Trash2, Plus, Camera, RefreshCw, ExternalLink } from 'lucide-react';
+import { Bell, BellOff, Download, Trash2, Plus, Camera, RefreshCw, ExternalLink, Settings, X } from 'lucide-react';
 
 // Утилита для конвертации VAPID ключа
 function urlBase64ToUint8Array(base64String: string) {
@@ -25,6 +25,16 @@ export default function Dashboard() {
   const [downloading, setDownloading] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
   const [parseLimit, setParseLimit] = useState(1);
+  const [expandedPosts, setExpandedPosts] = useState<Set<string>>(new Set());
+  const [showSettings, setShowSettings] = useState(false);
+
+  const toggleExpand = (id: string) => {
+    setExpandedPosts(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   useEffect(() => {
     // Подписка на аккаунты
@@ -35,7 +45,14 @@ export default function Dashboard() {
     // Подписка на посты
     const qPosts = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
     const unsubPosts = onSnapshot(qPosts, (snapshot) => {
-      setPosts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      const loaded = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+      // Сортируем по дате публикации (Instagram), fallback — дата добавления в базу
+      loaded.sort((a, b) => {
+        const dateA = a.publishedAt ? new Date(a.publishedAt).getTime() : (a.createdAt?.seconds * 1000 || 0);
+        const dateB = b.publishedAt ? new Date(b.publishedAt).getTime() : (b.createdAt?.seconds * 1000 || 0);
+        return dateB - dateA;
+      });
+      setPosts(loaded);
     });
 
     // Регистрация Service Worker
@@ -186,30 +203,35 @@ export default function Dashboard() {
             </select>
           </div>
           
-          <button 
-            onClick={subscribeToPush}
-            disabled={isSubscribed}
-            className={`flex items-center gap-2 px-4 py-2 rounded-full font-medium transition-colors ${
-              isSubscribed ? 'bg-green-100 text-green-700' : 'bg-blue-600 text-white hover:bg-blue-700'
+          <button
+            onClick={() => setShowSettings(s => !s)}
+            className={`p-2 rounded-full transition-colors ${
+              showSettings ? 'bg-pink-100 text-pink-600' : 'text-gray-500 hover:bg-gray-100'
             }`}
+            title="Настройки"
           >
-            {isSubscribed ? <BellOff size={18} /> : <Bell size={18} />}
-            <span className="hidden sm:inline">{isSubscribed ? 'Уведомления включены' : 'Включить Push'}</span>
+            <Settings size={20} />
           </button>
         </div>
       </nav>
 
-      <main className="max-w-6xl mx-auto p-6 grid grid-cols-1 md:grid-cols-3 gap-8 mt-6">
-        {/* Левая колонка: Аккаунты */}
-        <div className="md:col-span-1 space-y-6">
-          <div className="bg-white rounded-2xl shadow-sm border p-5">
-            <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-              Мониторинг аккаунтов
-            </h2>
+      {/* Панель настроек аккаунтов (слайд справа) */}
+      {showSettings && (
+        <div className="fixed inset-0 z-20" onClick={() => setShowSettings(false)}>
+          <div
+            className="absolute right-0 top-0 h-full w-80 bg-white shadow-2xl border-l p-6 overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold">Мониторинг аккаунтов</h2>
+              <button onClick={() => setShowSettings(false)} className="text-gray-400 hover:text-gray-700 transition">
+                <X size={20} />
+              </button>
+            </div>
             <form onSubmit={handleAddAccount} className="flex gap-2 mb-4">
-              <input 
-                type="text" 
-                placeholder="Имя профиля..." 
+              <input
+                type="text"
+                placeholder="Имя профиля..."
                 value={newAccount}
                 onChange={(e) => setNewAccount(e.target.value)}
                 className="flex-1 border rounded-lg px-3 py-2 outline-none focus:ring-2 focus:ring-pink-500"
@@ -218,7 +240,6 @@ export default function Dashboard() {
                 <Plus size={20} />
               </button>
             </form>
-
             <ul className="space-y-3">
               {accounts.map(acc => (
                 <li key={acc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border">
@@ -232,13 +253,28 @@ export default function Dashboard() {
                 <p className="text-gray-400 text-sm text-center py-4">Список пуст</p>
               )}
             </ul>
+
+            {/* Кнопка уведомлений */}
+            <div className="mt-6 pt-6 border-t">
+              <p className="text-sm text-gray-500 mb-3">Пуш-уведомления</p>
+              <button
+                onClick={subscribeToPush}
+                disabled={isSubscribed}
+                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-colors ${
+                  isSubscribed ? 'bg-green-100 text-green-700' : 'bg-blue-600 text-white hover:bg-blue-700'
+                }`}
+              >
+                {isSubscribed ? <BellOff size={18} /> : <Bell size={18} />}
+                {isSubscribed ? 'Уведомления включены' : 'Включить Push'}
+              </button>
+            </div>
           </div>
         </div>
+      )}
 
-        {/* Правая колонка: Лента */}
-        <div className="md:col-span-2">
-          <h2 className="text-2xl font-bold mb-6">Лента новых постов</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <main className="max-w-screen-2xl mx-auto px-6 pb-6 mt-6">
+        <h2 className="text-2xl font-bold mb-6">Лента новых постов</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
             {posts.map(post => (
               <div key={post.id} className="bg-white border rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition">
                 {/* Превью изображение */}
@@ -254,21 +290,41 @@ export default function Dashboard() {
                 )}
                 <div className="p-5">
                   <div className="flex items-center gap-2 mb-3">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-yellow-400 to-pink-600 flex items-center justify-center text-white font-bold text-xs">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-yellow-400 to-pink-600 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
                       {post.account?.charAt(0).toUpperCase()}
                     </div>
-                    <span className="font-bold text-sm">@{post.account}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-bold text-sm">@{post.account}</div>
+                      {post.publishedAt && (
+                        <div className="text-xs text-gray-400">
+                          {new Date(post.publishedAt).toLocaleString('ru-RU', {
+                            day: '2-digit', month: 'short', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit'
+                          })}
+                        </div>
+                      )}
+                    </div>
                     <a 
                       href={post.url} 
                       target="_blank" 
                       rel="noopener noreferrer"
-                      className="ml-auto text-gray-400 hover:text-pink-600 transition"
+                      className="text-gray-400 hover:text-pink-600 transition flex-shrink-0"
                       title="Открыть оригинал"
                     >
                       <ExternalLink size={16} />
                     </a>
                   </div>
-                  <p className="text-sm text-gray-600 mb-4 line-clamp-3">{post.text}</p>
+                  <p className={`text-sm text-gray-600 mb-1 whitespace-pre-wrap ${
+                    expandedPosts.has(post.id) ? '' : 'line-clamp-3'
+                  }`}>{post.text}</p>
+                  {post.text && post.text.length > 120 && (
+                    <button
+                      onClick={() => toggleExpand(post.id)}
+                      className="text-xs text-pink-500 hover:text-pink-700 font-medium mb-3 transition"
+                    >
+                      {expandedPosts.has(post.id) ? '▲ Скрыть' : '▼ Показать полностью'}
+                    </button>
+                  )}
                   
                   <div className="flex gap-2">
                     <button 
@@ -304,7 +360,6 @@ export default function Dashboard() {
                 Нет новых постов. Добавьте аккаунты для мониторинга.
               </div>
             )}
-          </div>
         </div>
       </main>
     </div>

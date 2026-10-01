@@ -70,6 +70,18 @@ export async function GET(req: NextRequest) {
           thumbnailUrl: item.displayUrl || item.thumbnailUrl || item.previewUrl || '',
           text: item.caption || `Новое видео от @${username}!`,
           account: username,
+          publishedAt: (() => {
+            try {
+              const ts = item.timestamp;
+              if (!ts) return null;
+              // Если уже строка ISO — используем как есть
+              if (typeof ts === 'string') return new Date(ts).toISOString();
+              // Если число — проверяем секунды vs миллисекунды
+              const ms = ts > 1e10 ? ts : ts * 1000;
+              const d = new Date(ms);
+              return isNaN(d.getTime()) ? null : d.toISOString();
+            } catch { return null; }
+          })(),
           createdAt: FieldValue.serverTimestamp()
         };
 
