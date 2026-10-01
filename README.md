@@ -1,36 +1,71 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Instagram Monitoring Dashboard
 
-## Getting Started
+Это веб-приложение на базе **Next.js (App Router)** для управления мониторингом Instagram-аккаунтов, скачивания видео (через `yt-dlp`) и получения браузерных Web Push уведомлений при выходе новых постов. База данных и подписки хранятся в **Firebase Firestore**.
 
-First, run the development server:
+## 🚀 Требования
 
+- **Node.js** 18+
+- Установленный **yt-dlp** в системе (доступен в переменной среды `PATH`).
+- Установленный **ffmpeg** (желательно, для объединения аудио и видео).
+- Проект **Firebase** (с включенной базой данных Firestore).
+
+---
+
+## 🛠️ Настройка проекта
+
+### 1. Подготовка Firebase
+1. Перейдите в [Firebase Console](https://console.firebase.google.com/) и создайте новый проект.
+2. В левом меню выберите **Firestore Database** и нажмите *Create database*. Настройте правила доступа (для старта можно использовать *Test mode*).
+3. Перейдите в настройки проекта (шестеренка -> **Project settings**).
+4. На вкладке **General** добавьте веб-приложение (иконка `</>`), чтобы получить конфигурацию для клиента (Client Config).
+5. Перейдите на вкладку **Service accounts**, нажмите *Generate new private key*. У вас скачается JSON-файл. Это ключи для Admin SDK.
+
+### 2. Ключи для Web Push (VAPID)
+Чтобы браузер разрешил отправлять пуш-уведомления, нам нужны VAPID ключи. В терминале выполните команду:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npx web-push generate-vapid-keys
+```
+Эта команда выдаст вам `Public Key` и `Private Key`. Сохраните их.
+
+### 3. Переменные окружения (.env)
+Скопируйте файл `.env.example` в `.env.local`:
+```bash
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Затем откройте `.env.local` и заполните все данные:
+- Данные из пункта 1.4 идут в блок `NEXT_PUBLIC_FIREBASE_...`
+- Данные из скачанного JSON (пункт 1.5) идут в `FIREBASE_CLIENT_EMAIL` и `FIREBASE_PRIVATE_KEY` (ОБЯЗАТЕЛЬНО: оставьте переносы строк `\n` как они есть или оберните весь ключ в кавычки).
+- Данные из пункта 2 (VAPID) идут в `NEXT_PUBLIC_VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 4. Установка yt-dlp (для Windows)
+Если `yt-dlp` еще не установлен, откройте PowerShell и выполните:
+```powershell
+winget install yt-dlp
+winget install ffmpeg
+```
+*После этого перезапустите терминал.*
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## 💻 Запуск проекта
 
-To learn more about Next.js, take a look at the following resources:
+Установите зависимости (если еще не установлены):
+```bash
+npm install
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Запустите сервер разработки:
+```bash
+npm run dev
+```
+Откройте браузер по адресу [http://localhost:3000](http://localhost:3000).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## ⚙️ Как работает система
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. **Добавление аккаунтов**: В панели слева вы добавляете логины Instagram, за которыми хотите следить (данные попадают в коллекцию `accounts` в Firestore).
+2. **Push-уведомления**: Нажав кнопку «Включить Push» в верхнем меню, ваш браузер запросит разрешение. После подтверждения ваша подписка сохранится в Firestore (коллекция `subscriptions`).
+3. **Скачивание видео**: При нажатии кнопки «Скачать видео» фронтенд обращается к роуту `/api/download`. Сервер скачивает файл через `yt-dlp` во временную папку ОС, отдает файл браузеру и сразу же его удаляет.
+4. **Мониторинг (Cron)**: В проекте есть роут `/api/cron`. Вы можете настроить внешний планировщик (например, Vercel Cron или cron-job.org), чтобы он раз в 30 минут открывал URL `https://ваш-сайт.com/api/cron`. Роут сымитирует поиск новых постов (сейчас там стоит заглушка), запишет их в Firestore и разошлет Web Push всем подписчикам.
