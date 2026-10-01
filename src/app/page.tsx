@@ -23,6 +23,7 @@ export default function Dashboard() {
   const [newAccount, setNewAccount] = useState('');
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [isParsing, setIsParsing] = useState(false);
 
   useEffect(() => {
     // Подписка на аккаунты
@@ -122,6 +123,29 @@ export default function Dashboard() {
     }
   };
 
+  const handleRemovePost = async (id: string) => {
+    if (confirm('Удалить этот пост?')) {
+      await deleteDoc(doc(db, 'posts', id));
+    }
+  };
+
+  const handleManualParse = async () => {
+    try {
+      setIsParsing(true);
+      const res = await fetch('/api/cron');
+      const data = await res.json();
+      if (data.success) {
+        alert(`Парсинг завершен! Найдено новых постов: ${data.newPosts}`);
+      } else {
+        alert('Ошибка парсинга: ' + (data.error || 'Неизвестная ошибка'));
+      }
+    } catch (e) {
+      alert('Ошибка соединения с сервером');
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans">
       {/* Навигация */}
@@ -129,16 +153,29 @@ export default function Dashboard() {
         <div className="flex items-center gap-2 text-pink-600 font-bold text-xl">
           <Camera /> InstaDash
         </div>
-        <button 
-          onClick={subscribeToPush}
-          disabled={isSubscribed}
-          className={`flex items-center gap-2 px-4 py-2 rounded-full font-medium transition-colors ${
-            isSubscribed ? 'bg-green-100 text-green-700' : 'bg-blue-600 text-white hover:bg-blue-700'
-          }`}
-        >
-          {isSubscribed ? <BellOff size={18} /> : <Bell size={18} />}
-          {isSubscribed ? 'Уведомления включены' : 'Включить Push'}
-        </button>
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={handleManualParse}
+            disabled={isParsing}
+            className={`flex items-center gap-2 px-4 py-2 rounded-full font-medium transition-colors border ${
+              isParsing ? 'bg-gray-100 text-gray-500' : 'bg-white text-gray-800 hover:bg-gray-50'
+            }`}
+          >
+            <RefreshCw className={isParsing ? "animate-spin" : ""} size={18} />
+            <span className="hidden sm:inline">{isParsing ? 'Ищем посты...' : 'Запустить парсер'}</span>
+          </button>
+          
+          <button 
+            onClick={subscribeToPush}
+            disabled={isSubscribed}
+            className={`flex items-center gap-2 px-4 py-2 rounded-full font-medium transition-colors ${
+              isSubscribed ? 'bg-green-100 text-green-700' : 'bg-blue-600 text-white hover:bg-blue-700'
+            }`}
+          >
+            {isSubscribed ? <BellOff size={18} /> : <Bell size={18} />}
+            <span className="hidden sm:inline">{isSubscribed ? 'Уведомления включены' : 'Включить Push'}</span>
+          </button>
+        </div>
       </nav>
 
       <main className="max-w-6xl mx-auto p-6 grid grid-cols-1 md:grid-cols-3 gap-8 mt-6">
@@ -199,7 +236,14 @@ export default function Dashboard() {
                       className="flex-1 flex items-center justify-center gap-2 bg-gray-900 text-white py-2.5 rounded-xl text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
                     >
                       {downloading === post.id ? <RefreshCw className="animate-spin" size={16} /> : <Download size={16} />}
-                      {downloading === post.id ? 'Скачивание...' : 'Скачать видео'}
+                      {downloading === post.id ? 'Скачивание...' : 'Скачать'}
+                    </button>
+                    <button 
+                      onClick={() => handleRemovePost(post.id)}
+                      className="flex items-center justify-center bg-red-50 text-red-500 hover:bg-red-100 px-3 py-2.5 rounded-xl transition"
+                      title="Удалить пост"
+                    >
+                      <Trash2 size={18} />
                     </button>
                   </div>
                 </div>
