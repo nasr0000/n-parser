@@ -15,6 +15,10 @@ export async function GET(req: NextRequest) {
     
     const adminDb = getAdminDb();
     
+    // Количество постов: из query-параметра или 1 по умолчанию
+    const { searchParams } = new URL(req.url);
+    const limit = Math.min(parseInt(searchParams.get('limit') || '1'), 10);
+    
     // Инициализация Apify
     const client = new ApifyClient({
         token: process.env.APIFY_API_TOKEN,
@@ -31,11 +35,11 @@ export async function GET(req: NextRequest) {
     // Формируем прямые ссылки на профили для Apify
     const directUrls = usernames.map(u => `https://www.instagram.com/${u}/`);
 
-    // Запускаем Instagram Scraper от Apify (используем бесплатный и быстрый актор: apify/instagram-scraper)
+    // Запускаем Instagram Scraper от Apify
     const run = await client.actor("apify/instagram-scraper").call({
         directUrls: directUrls,
         resultsType: "posts",
-        resultsLimit: 1, // По 1 посту на каждый аккаунт
+        resultsLimit: limit,
     });
 
     // Получаем результаты
@@ -63,6 +67,7 @@ export async function GET(req: NextRequest) {
           id: docId,
           url: url,
           videoUrl: item.videoUrl || item.displayUrl || url,
+          thumbnailUrl: item.displayUrl || item.thumbnailUrl || item.previewUrl || '',
           text: item.caption || `Новое видео от @${username}!`,
           account: username,
           createdAt: FieldValue.serverTimestamp()
@@ -75,9 +80,10 @@ export async function GET(req: NextRequest) {
         // Отправляем Push
         const subsSnapshot = await adminDb.collection('subscriptions').get();
         const payload = JSON.stringify({
-          title: `Новый пост от @${username}`,
-          body: 'Нажмите, чтобы посмотреть или скачать.',
-          url: '/'
+          title: `📸 Новый пост от @${username}`,
+          body: (item.caption || '').slice(0, 100) || 'Нажмите, чтобы открыть или скачать.',
+          image: postData.thumbnailUrl || '',
+          url: postData.url
         });
 
         subsSnapshot.forEach(async (doc) => {

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, query, orderBy } from 'firebase/firestore';
-import { Bell, BellOff, Download, Trash2, Plus, Camera, RefreshCw } from 'lucide-react';
+import { Bell, BellOff, Download, Trash2, Plus, Camera, RefreshCw, ExternalLink } from 'lucide-react';
 
 // Утилита для конвертации VAPID ключа
 function urlBase64ToUint8Array(base64String: string) {
@@ -24,6 +24,7 @@ export default function Dashboard() {
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
+  const [parseLimit, setParseLimit] = useState(1);
 
   useEffect(() => {
     // Подписка на аккаунты
@@ -81,8 +82,13 @@ export default function Dashboard() {
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || '')
       });
+
+      // Удаляем ВСЕ старые подписки, чтобы не было дублей
+      const { getDocs } = await import('firebase/firestore');
+      const oldSubs = await getDocs(collection(db, 'subscriptions'));
+      await Promise.all(oldSubs.docs.map(d => deleteDoc(doc(db, 'subscriptions', d.id))));
       
-      // Сохраняем подписку в Firebase
+      // Сохраняем единственную свежую подписку
       await addDoc(collection(db, 'subscriptions'), {
         subscription: JSON.parse(JSON.stringify(sub)),
         createdAt: serverTimestamp()
@@ -129,10 +135,10 @@ export default function Dashboard() {
     }
   };
 
-  const handleManualParse = async () => {
+  const handleManualParse = async (limit?: number) => {
     try {
       setIsParsing(true);
-      const res = await fetch('/api/cron');
+      const res = await fetch(`/api/cron?limit=${limit || parseLimit}`);
       const data = await res.json();
       if (data.success) {
         alert(`Парсинг завершен! Найдено новых постов: ${data.newPosts}`);
@@ -154,16 +160,31 @@ export default function Dashboard() {
           <Camera /> InstaDash
         </div>
         <div className="flex items-center gap-3">
-          <button 
-            onClick={handleManualParse}
-            disabled={isParsing}
-            className={`flex items-center gap-2 px-4 py-2 rounded-full font-medium transition-colors border ${
-              isParsing ? 'bg-gray-100 text-gray-500' : 'bg-white text-gray-800 hover:bg-gray-50'
-            }`}
-          >
-            <RefreshCw className={isParsing ? "animate-spin" : ""} size={18} />
-            <span className="hidden sm:inline">{isParsing ? 'Ищем посты...' : 'Запустить парсер'}</span>
-          </button>
+          {/* Группа кнопок парсера с выбором количества */}
+          <div className="flex items-center border rounded-full overflow-hidden bg-white">
+            <button 
+              onClick={() => handleManualParse()}
+              disabled={isParsing}
+              className={`flex items-center gap-2 px-4 py-2 font-medium transition-colors ${
+                isParsing ? 'bg-gray-100 text-gray-500' : 'bg-white text-gray-800 hover:bg-gray-50'
+              }`}
+            >
+              <RefreshCw className={isParsing ? "animate-spin" : ""} size={18} />
+              <span className="hidden sm:inline">{isParsing ? 'Ищем...' : 'Запустить'}</span>
+            </button>
+            <div className="w-px h-6 bg-gray-200" />
+            <select
+              value={parseLimit}
+              onChange={(e) => setParseLimit(Number(e.target.value))}
+              disabled={isParsing}
+              className="pr-3 pl-2 py-2 bg-white text-gray-700 text-sm font-medium outline-none cursor-pointer disabled:opacity-50"
+            >
+              <option value={1}>1 пост</option>
+              <option value={3}>3 поста</option>
+              <option value={5}>5 постов</option>
+              <option value={10}>10 постов</option>
+            </select>
+          </div>
           
           <button 
             onClick={subscribeToPush}
@@ -220,12 +241,32 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {posts.map(post => (
               <div key={post.id} className="bg-white border rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition">
+                {/* Превью изображение */}
+                {post.thumbnailUrl && (
+                  <div className="relative w-full aspect-square bg-gray-100 overflow-hidden">
+                    <img 
+                      src={post.thumbnailUrl} 
+                      alt={`Пост от @${post.account}`}
+                      className="w-full h-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                    />
+                  </div>
+                )}
                 <div className="p-5">
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-yellow-400 to-pink-600 flex items-center justify-center text-white font-bold text-xs">
                       {post.account?.charAt(0).toUpperCase()}
                     </div>
                     <span className="font-bold text-sm">@{post.account}</span>
+                    <a 
+                      href={post.url} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="ml-auto text-gray-400 hover:text-pink-600 transition"
+                      title="Открыть оригинал"
+                    >
+                      <ExternalLink size={16} />
+                    </a>
                   </div>
                   <p className="text-sm text-gray-600 mb-4 line-clamp-3">{post.text}</p>
                   
@@ -238,6 +279,15 @@ export default function Dashboard() {
                       {downloading === post.id ? <RefreshCw className="animate-spin" size={16} /> : <Download size={16} />}
                       {downloading === post.id ? 'Скачивание...' : 'Скачать'}
                     </button>
+                    <a
+                      href={post.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center bg-pink-50 text-pink-600 hover:bg-pink-100 px-3 py-2.5 rounded-xl transition"
+                      title="Открыть оригинальную публикацию"
+                    >
+                      <ExternalLink size={18} />
+                    </a>
                     <button 
                       onClick={() => handleRemovePost(post.id)}
                       className="flex items-center justify-center bg-red-50 text-red-500 hover:bg-red-100 px-3 py-2.5 rounded-xl transition"

@@ -43,3 +43,10 @@ next-env.d.ts
 # Firebase private keys
 *-firebase-adminsdk-*.json
 test_fb.js
+
+.vercel
+.env*
+.firebase
+.firebaserc
+firebase.json
+.env.production

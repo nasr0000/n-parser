@@ -3,12 +3,26 @@ self.addEventListener('push', function (event) {
     const data = event.data.json();
     const options = {
       body: data.body,
-      icon: '/icon.png', // Добавьте иконку в папку public
-      vibrate: [100, 50, 100],
+      icon: data.image || '/icon.png',  // Превью поста как иконка (или иконка приложения)
+      badge: '/icon.png',               // Маленький значок на Android
+      image: data.image || null,        // Большое фото под текстом (Chrome Desktop/Android)
+      vibrate: [200, 100, 200],         // Паттерн вибрации
+      tag: 'new-post',                  // Заменяет предыдущее уведомление
+      renotify: true,
+      requireInteraction: false,
+      actions: [
+        {
+          action: 'open',
+          title: '📂 Открыть',
+        },
+        {
+          action: 'close',
+          title: '✖ Закрыть',
+        }
+      ],
       data: {
         dateOfArrival: Date.now(),
-        primaryKey: '2',
-        url: data.url
+        url: data.url || '/'
       }
     };
     event.waitUntil(self.registration.showNotification(data.title, options));
@@ -17,13 +31,17 @@ self.addEventListener('push', function (event) {
 
 self.addEventListener('notificationclick', function (event) {
   event.notification.close();
+
+  if (event.action === 'close') return;
+
+  // По клику на "Открыть" или на само уведомление — переходим на сайт
   const targetUrl = event.notification.data.url || '/';
-  
+
   event.waitUntil(
-    clients.matchAll({ type: 'window' }).then(windowClients => {
-      // Ищем уже открытую вкладку
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+      // Ищем уже открытую вкладку с нашим сайтом
       for (let client of windowClients) {
-        if (client.url === targetUrl && 'focus' in client) {
+        if ('focus' in client) {
           return client.focus();
         }
       }
