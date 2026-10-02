@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, query, orderBy } from 'firebase/firestore';
-import { Bell, BellOff, Download, Trash2, Plus, Camera, RefreshCw, ExternalLink, Settings, X } from 'lucide-react';
+import { Bell, BellOff, Download, Trash2, Plus, Camera, RefreshCw, ExternalLink, Settings, X, LayoutGrid, Video, Image } from 'lucide-react';
 
 // Утилита для конвертации VAPID ключа
 function urlBase64ToUint8Array(base64String: string) {
@@ -17,6 +17,22 @@ function urlBase64ToUint8Array(base64String: string) {
   return outputArray;
 }
 
+// Компонент текста с разворачиванием для browse-модала
+function BrowseItemText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = text.length > 100;
+  return (
+    <div>
+      <p className={`text-xs text-gray-600 whitespace-pre-wrap ${expanded ? '' : 'line-clamp-3'}`}>{text}</p>
+      {isLong && (
+        <button onClick={() => setExpanded(e => !e)} className="text-[11px] text-pink-500 hover:text-pink-700 mt-0.5">
+          {expanded ? '▲ Скрыть' : '▼ Ещё'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [accounts, setAccounts] = useState<any[]>([]);
   const [posts, setPosts] = useState<any[]>([]);
@@ -27,6 +43,27 @@ export default function Dashboard() {
   const [parseLimit, setParseLimit] = useState(1);
   const [expandedPosts, setExpandedPosts] = useState<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState(false);
+  const [browseModal, setBrowseModal] = useState<{ username: string } | null>(null);
+  const [browseItems, setBrowseItems] = useState<any[]>([]);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseLoadingMore, setBrowseLoadingMore] = useState(false);
+  const [downloadingBrowse, setDownloadingBrowse] = useState<string | null>(null);
+
+  // localStorage-кэш: сохраняется между сессиями
+  const getCached = (username: string): any[] => {
+    try { return JSON.parse(localStorage.getItem(`browse_${username}`) || '[]'); }
+    catch { return []; }
+  };
+  const setCached = (username: string, posts: any[]) => {
+    try { localStorage.setItem(`browse_${username}`, JSON.stringify(posts)); } catch {}
+  };
+  // Сортировка по дате оригинальной публикации (новые сверху)
+  const sortByDate = (posts: any[]) =>
+    [...posts].sort((a, b) => {
+      const da = a.publishedAt ? new Date(a.publishedAt).getTime() : 0;
+      const db2 = b.publishedAt ? new Date(b.publishedAt).getTime() : 0;
+      return db2 - da;
+    });
 
   const toggleExpand = (id: string) => {
     setExpandedPosts(prev => {
@@ -34,6 +71,66 @@ export default function Dashboard() {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
+
+  const openBrowse = async (username: string) => {
+    setBrowseModal({ username });
+    const cached = getCached(username);
+    setBrowseItems(sortByDate(cached));
+    if (cached.length === 0) {
+      setBrowseLoading(true);
+      try {
+        const res = await fetch(`/api/browse?username=${encodeURIComponent(username)}&limit=12&skip=0`);
+        const data = await res.json();
+        if (data.success) {
+          const sorted = sortByDate(data.posts);
+          setCached(username, sorted);
+          setBrowseItems(sorted);
+        } else alert('Ошибка: ' + (data.error || 'unknown'));
+      } catch { alert('Ошибка соединения'); }
+      finally { setBrowseLoading(false); }
+    }
+  };
+
+  const loadMoreBrowse = async () => {
+    if (!browseModal) return;
+    const { username } = browseModal;
+    const currentList = getCached(username);
+    setBrowseLoadingMore(true);
+    try {
+      const res = await fetch(`/api/browse?username=${encodeURIComponent(username)}&limit=12&skip=${currentList.length}`);
+      const data = await res.json();
+      if (data.success) {
+        const existing = new Set(currentList.map((p: any) => p.id));
+        const newOnes = data.posts.filter((p: any) => !existing.has(p.id));
+        const merged = sortByDate([...currentList, ...newOnes]);
+        setCached(username, merged);
+        setBrowseItems(merged);
+      } else alert('Ошибка: ' + (data.error || 'unknown'));
+    } catch { alert('Ошибка соединения'); }
+    finally { setBrowseLoadingMore(false); }
+  };
+
+  const downloadBrowseItem = async (item: any) => {
+    try {
+      setDownloadingBrowse(item.id);
+      const res = await fetch('/api/download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: item.videoUrl || item.url })
+      });
+      if (!res.ok) throw new Error();
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = window.URL.createObjectURL(blob);
+      a.download = `instagram_${item.id || Date.now()}`;
+      a.click();
+      a.remove();
+    } catch {
+      alert('Не удалось скачать');
+    } finally {
+      setDownloadingBrowse(null);
+    }
   };
 
   useEffect(() => {
@@ -242,10 +339,18 @@ export default function Dashboard() {
             </form>
             <ul className="space-y-3">
               {accounts.map(acc => (
-                <li key={acc.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl border">
-                  <span className="font-medium text-sm">@{acc.username}</span>
-                  <button onClick={() => handleRemoveAccount(acc.id)} className="text-red-500 hover:bg-red-50 p-1 rounded-md transition">
-                    <Trash2 size={16} />
+                <li key={acc.id} className="p-3 bg-gray-50 rounded-xl border">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-sm">@{acc.username}</span>
+                    <button onClick={() => handleRemoveAccount(acc.id)} className="text-red-500 hover:bg-red-50 p-1 rounded-md transition">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => { setShowSettings(false); openBrowse(acc.username); }}
+                    className="mt-2 w-full flex items-center justify-center gap-2 text-xs bg-gray-900 text-white py-1.5 rounded-lg hover:bg-gray-800 transition"
+                  >
+                    <LayoutGrid size={14} /> Открыть публикации
                   </button>
                 </li>
               ))}
@@ -362,6 +467,115 @@ export default function Dashboard() {
             )}
         </div>
       </main>
+
+      {/* Модальное окно: просмотр публикаций аккаунта */}
+      {browseModal && (
+        <div className="fixed inset-0 z-30 bg-black/60 flex items-start justify-center pt-10 px-4 pb-4" onClick={() => setBrowseModal(null)}>
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Заголовок */}
+            <div className="flex items-center justify-between px-6 py-4 border-b">
+              <div>
+                <h2 className="text-lg font-bold">@{browseModal.username}</h2>
+                <p className="text-xs text-gray-400">
+                  {browseItems.length} {browseItems.length === 0 ? 'публикаций' : 'публикаций загружено'}
+                  {browseLoading && ' — загружаем...'}
+                </p>
+              </div>
+              <button onClick={() => setBrowseModal(null)} className="text-gray-400 hover:text-gray-700 p-1 transition">
+                <X size={22} />
+              </button>
+            </div>
+
+            {/* Контент */}
+            <div className="overflow-y-auto flex-1 p-4">
+              {browseLoading ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <RefreshCw className="animate-spin text-pink-500" size={32} />
+                  <p className="text-gray-500 text-sm">Загружаем публикации через Apify...</p>
+                  <p className="text-gray-400 text-xs">Это займёт ~30 секунд</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {browseItems.map((item, i) => (
+                    <div key={item.id || i} className="bg-white border rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition flex flex-col">
+                      {/* Превью */}
+                      <div className="relative aspect-square bg-gray-100 flex-shrink-0">
+                        {item.thumbnailUrl ? (
+                          <img src={item.thumbnailUrl} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-gray-300">
+                            <Image size={32} />
+                          </div>
+                        )}
+                        {item.type === 'Video' && (
+                          <div className="absolute top-2 right-2 bg-black/60 rounded-full px-2 py-0.5 flex items-center gap-1">
+                            <Video size={11} className="text-white" />
+                            <span className="text-white text-[10px]">Видео</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Описание */}
+                      <div className="p-3 flex flex-col gap-2 flex-1">
+                        {item.publishedAt && (
+                          <p className="text-[11px] text-gray-400">
+                            {new Date(item.publishedAt).toLocaleString('ru-RU', {
+                              day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                            })}
+                          </p>
+                        )}
+                        {item.text && (
+                          <BrowseItemText text={item.text} />
+                        )}
+                        <div className="mt-auto flex gap-2">
+                          <button
+                            onClick={() => downloadBrowseItem(item)}
+                            disabled={downloadingBrowse === item.id}
+                            className="flex-1 flex items-center justify-center gap-1.5 bg-gray-900 text-white py-2 rounded-xl text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
+                          >
+                            {downloadingBrowse === item.id
+                              ? <><RefreshCw size={14} className="animate-spin" /> ...</>
+                              : <><Download size={14} /> Скачать</>}
+                          </button>
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center justify-center bg-pink-50 text-pink-600 hover:bg-pink-100 px-3 py-2 rounded-xl transition"
+                            title="Открыть оригинал"
+                          >
+                            <ExternalLink size={16} />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {browseItems.length === 0 && !browseLoading && (
+                    <p className="col-span-full text-center text-gray-400 py-10">Ничего не найдено</p>
+                  )}
+                </div>
+              )}
+              {/* Кнопка загрузить ещё */}
+              {!browseLoading && browseItems.length > 0 && (
+                <div className="flex justify-center pt-4 pb-2">
+                  <button
+                    onClick={loadMoreBrowse}
+                    disabled={browseLoadingMore}
+                    className="flex items-center gap-2 px-6 py-2.5 bg-gray-900 text-white rounded-full text-sm font-medium hover:bg-gray-800 transition disabled:opacity-50"
+                  >
+                    {browseLoadingMore
+                      ? <><RefreshCw size={15} className="animate-spin" /> Загружаем ещё 12...</>
+                      : <>↧ Загрузить ещё 12</>}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
